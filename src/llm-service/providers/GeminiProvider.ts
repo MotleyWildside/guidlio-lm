@@ -91,7 +91,10 @@ export class GeminiProvider implements LLMProvider {
       });
 
       const lastMessage = contents[contents.length - 1];
-      const result = await chat.sendMessage(lastMessage.parts);
+      const result = await chat.sendMessage(
+        lastMessage.parts,
+        request.signal ? { signal: request.signal } : undefined
+      );
       const response = await result.response;
       const text = response.text();
 
@@ -142,7 +145,10 @@ export class GeminiProvider implements LLMProvider {
       });
 
       const lastMessage = contents[contents.length - 1];
-      const result = await chat.sendMessageStream(lastMessage.parts);
+      const result = await chat.sendMessageStream(
+        lastMessage.parts,
+        request.signal ? { signal: request.signal } : undefined
+      );
 
       return {
         stream: (async function* () {
@@ -175,15 +181,18 @@ export class GeminiProvider implements LLMProvider {
           ? TaskType.RETRIEVAL_QUERY
           : TaskType.RETRIEVAL_DOCUMENT;
 
-      const result = await model.embedContent({
-        content: { parts: [{ text: request.text }], role: 'user' },
-        taskType,
-        // outputDimensionality is not in the standard EmbedContentRequest type in some versions
-        // but it is supported by the API for some models. Using cast for this specific field.
-        ...(request.dimensions
-          ? { outputDimensionality: request.dimensions }
-          : {}),
-      } as EmbedContentRequest & { outputDimensionality?: number });
+      const result = await model.embedContent(
+        {
+          content: { parts: [{ text: request.text }], role: 'user' },
+          taskType,
+          // outputDimensionality is not in the standard EmbedContentRequest type in some versions
+          // but it is supported by the API for some models. Using cast for this specific field.
+          ...(request.dimensions
+            ? { outputDimensionality: request.dimensions }
+            : {}),
+        } as EmbedContentRequest & { outputDimensionality?: number },
+        request.signal ? { signal: request.signal } : undefined
+      );
 
       return {
         embedding: Array.from(result.embedding.values),
@@ -208,20 +217,23 @@ export class GeminiProvider implements LLMProvider {
           ? TaskType.RETRIEVAL_QUERY
           : TaskType.RETRIEVAL_DOCUMENT;
 
-      const result = await model.batchEmbedContents({
-        requests: request.texts.map(
-          (text) =>
-            ({
-              content: { parts: [{ text }], role: 'user' },
-              taskType,
-              ...(request.dimensions
-                ? { outputDimensionality: request.dimensions }
-                : {}),
-            }) as EmbedContentRequest & {
-              outputDimensionality?: number;
-            }
-        ),
-      });
+      const result = await model.batchEmbedContents(
+        {
+          requests: request.texts.map(
+            (text) =>
+              ({
+                content: { parts: [{ text }], role: 'user' },
+                taskType,
+                ...(request.dimensions
+                  ? { outputDimensionality: request.dimensions }
+                  : {}),
+              }) as EmbedContentRequest & {
+                outputDimensionality?: number;
+              }
+          ),
+        },
+        request.signal ? { signal: request.signal } : undefined
+      );
 
       return {
         embeddings: result.embeddings.map((e) => Array.from(e.values)),

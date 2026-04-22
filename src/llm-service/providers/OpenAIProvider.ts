@@ -1,4 +1,4 @@
-import OpenAI from 'openai/index.mjs';
+import OpenAI from 'openai';
 import { LLMError, LLMTransientError, LLMPermanentError } from '../errors';
 import type {
   LLMProvider,
@@ -82,7 +82,9 @@ export class OpenAIProvider implements LLMProvider {
         openaiParams.response_format = { type: 'json_object' };
       }
 
-      const stream = await client.chat.completions.create(openaiParams);
+      const stream = await client.chat.completions.create(openaiParams, {
+        signal: request.signal,
+      });
 
       return {
         stream: (async function* () {
@@ -169,7 +171,9 @@ export class OpenAIProvider implements LLMProvider {
         openaiParams.response_format = { type: 'json_object' };
       }
 
-      const completion = await client.chat.completions.create(openaiParams);
+      const completion = await client.chat.completions.create(openaiParams, {
+        signal: request.signal,
+      });
 
       const choice = completion.choices[0];
       const message = choice?.message;
@@ -210,11 +214,14 @@ export class OpenAIProvider implements LLMProvider {
   ): Promise<LLMProviderEmbedResponse> {
     try {
       const client = this.getClient();
-      const response = await client.embeddings.create({
-        model: request.model,
-        input: request.text,
-        dimensions: request.dimensions ?? 1536,
-      });
+      const response = await client.embeddings.create(
+        {
+          model: request.model,
+          input: request.text,
+          dimensions: request.dimensions ?? 1536,
+        },
+        { signal: request.signal }
+      );
 
       return {
         embedding: response.data[0].embedding,
@@ -235,11 +242,14 @@ export class OpenAIProvider implements LLMProvider {
   ): Promise<LLMProviderEmbedBatchResponse> {
     try {
       const client = this.getClient();
-      const response = await client.embeddings.create({
-        model: request.model,
-        input: request.texts,
-        dimensions: request.dimensions ?? 1536,
-      });
+      const response = await client.embeddings.create(
+        {
+          model: request.model,
+          input: request.texts,
+          dimensions: request.dimensions ?? 1536,
+        },
+        { signal: request.signal }
+      );
 
       return {
         embeddings: response.data.map((d) => d.embedding),

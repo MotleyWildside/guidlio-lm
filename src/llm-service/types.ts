@@ -20,6 +20,7 @@ export interface LLMTextParams {
 	idempotencyKey?: string;
 	cache?: CacheConfig;
 	traceId?: string;
+	signal?: AbortSignal;
 }
 
 /**
@@ -37,6 +38,8 @@ export interface LLMEmbedParams {
 	model: string;
 	dimensions?: number;
 	taskType?: "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY";
+	traceId?: string;
+	signal?: AbortSignal;
 }
 
 /**
@@ -47,6 +50,8 @@ export interface LLMEmbedBatchParams {
 	model: string;
 	dimensions?: number;
 	taskType?: "RETRIEVAL_DOCUMENT" | "RETRIEVAL_QUERY";
+	traceId?: string;
+	signal?: AbortSignal;
 }
 
 /**
@@ -122,6 +127,7 @@ export interface ProviderRequest {
 	topP?: number;
 	seed?: number;
 	responseFormat: "text" | "json";
+	signal?: AbortSignal;
 }
 
 /**
@@ -143,13 +149,37 @@ export interface LLMServiceConfig {
 	 */
 	providers: LLMProvider[];
 	/**
-	 * Default provider name to use (if not specified, auto-selects based on model)
+	 * Default provider name to use. Wins over auto-selection by model prefix.
+	 * If the name does not resolve to a registered provider, the service falls back
+	 * to auto-selection and logs a warning.
 	 */
 	defaultProvider?: string;
+	/**
+	 * Final fallback model used when neither the call params nor the prompt
+	 * definition specify one.
+	 */
 	defaultModel?: string;
 	defaultTemperature?: number;
-	maxRetries?: number;
+	/**
+	 * Maximum number of call attempts (1 = no retries, 3 = original + 2 retries).
+	 * Only `LLMTransientError` triggers a retry. Defaults to 3.
+	 */
+	maxAttempts?: number;
+	/**
+	 * Base delay for exponential backoff in milliseconds. Defaults to 1000.
+	 */
 	retryBaseDelayMs?: number;
+	/**
+	 * Upper bound on a single retry delay including jitter (milliseconds).
+	 * Defaults to 30000.
+	 */
+	maxDelayMs?: number;
+	/**
+	 * When true, `getProvider` throws if no registered provider supports the model
+	 * (instead of falling back to the first registered provider). Defaults to false
+	 * for backwards compatibility.
+	 */
+	strictProviderSelection?: boolean;
 	enableCache?: boolean;
 	cacheProvider?: CacheProvider;
 	promptRegistry?: PromptRegistry;

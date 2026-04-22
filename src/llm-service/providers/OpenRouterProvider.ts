@@ -91,7 +91,9 @@ export class OpenRouterProvider implements LLMProvider {
         };
       }
 
-      const stream = await client.chat.send(chatParams);
+      const stream = await client.chat.send(chatParams, {
+        signal: request.signal,
+      });
 
       return {
         stream: (async function* () {
@@ -185,7 +187,9 @@ export class OpenRouterProvider implements LLMProvider {
         };
       }
 
-      const completion = (await client.chat.send(chatParams)) as ChatResponse;
+      const completion = (await client.chat.send(chatParams, {
+        signal: request.signal,
+      })) as ChatResponse;
 
       const choice = completion.choices[0];
       const message = choice?.message;

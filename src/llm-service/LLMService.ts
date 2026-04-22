@@ -1,10 +1,12 @@
-import { z } from "zod";
-import { createHash, randomUUID } from "crypto";
+import { randomUUID } from "crypto";
 import { PromptRegistry } from "./prompts-registry/PromptRegistry";
-import type { LLMProvider } from "./providers/types";
+import type { PromptDefinition } from "./prompts-registry/types";
+import type {
+	LLMProvider,
+	LLMProviderResponse,
+} from "./providers/types";
 import type { CacheProvider } from "./cache/types";
 import { InMemoryCacheProvider } from "./cache/CacheProvider";
-import { LLMTransientError, LLMParseError, LLMSchemaError } from "./errors";
 import type {
 	LLMTextParams,
 	LLMJsonParams,
@@ -16,13 +18,28 @@ import type {
 	LLMEmbedBatchParams,
 	LLMEmbedBatchResult,
 	LLMServiceConfig,
-	LLMCallLogEntry,
 	ProviderRequest,
-	ResolvedCall,
 } from "./types";
 import type { LLMLogger } from "../logger/types";
+import { CallContext, logOutcome, errorMessage } from "./internal/logContext";
+import { callWithRetries } from "./internal/retry";
+import { buildCacheKey } from "./internal/cacheKey";
+import { selectProvider } from "./internal/providerSelection";
+import {
+	parseAndRepairJSON,
+	validateSchema,
+	enforceJsonInstruction,
+} from "./internal/jsonHelpers";
 
 // ──────────────────────────────────────────────────────────────────────────────
+
+type ResolvedPrompt = {
+	prompt: PromptDefinition;
+	model: string;
+	provider: LLMProvider;
+};
+
+type Messages = ReturnType<PromptRegistry["buildMessages"]>;
 
 /**
  * Main LLM Gateway Service
@@ -56,126 +73,16 @@ export class LLMService {
 		return this.promptReg;
 	}
 
-	// ─── Provider selection ──────────────────────────────────────────────────
-
-	/**
-	 * Get provider for a given model (auto-selects based on model name).
-	 * Falls back to auto-selection with a warning if defaultProvider is configured but missing.
-	 */
-	private getProvider(model: string): LLMProvider {
-		if (this.config.defaultProvider) {
-			const provider = this.providers.get(this.config.defaultProvider);
-			if (provider) return provider;
-
-			// Warn instead of silently ignoring a misconfiguration
-			this.logCall({
-				model,
-				success: false,
-				error: `Default provider "${this.config.defaultProvider}" not found — falling back to auto-select`,
-				durationMs: 0,
-			});
-		}
-
-		for (const provider of this.providers.values()) {
-			if (provider.supportsModel(model)) return provider;
-		}
-
-		const firstProvider = Array.from(this.providers.values())[0];
-		if (!firstProvider) {
-			throw new Error("No LLM providers available");
-		}
-
-		return firstProvider;
-	}
-
 	// ─── Public API ──────────────────────────────────────────────────────────
 
 	/**
 	 * Generate text response
 	 */
 	async callText(params: LLMTextParams): Promise<LLMTextResult> {
-		const startTime = Date.now();
-		const traceId = params.traceId || this.generateTraceId();
-		const { prompt, model, provider, cacheKey } = this.resolveCall(params);
-
-		// Cache read
-		if (
-			params.cache?.mode === "read_through" &&
-			this.config.enableCache !== false
-		) {
-			const cached = await this.cache.get<LLMTextResult>(cacheKey);
-			if (cached) {
-				this.logCall({
-					traceId,
-					promptId: params.promptId,
-					promptVersion: prompt.version,
-					model,
-					provider: provider.name,
-					success: true,
-					cached: true,
-					durationMs: Date.now() - startTime,
-				});
-				return { ...cached, traceId };
-			}
-		}
-
-		const messages = this.promptReg.buildMessages(prompt, params.variables);
-		const providerRequest = this.buildProviderRequest(
-			params,
-			prompt,
-			model,
-			messages,
-			"text",
-		);
-
-		try {
-			const response = await this.callWithRetries(
-				() => provider.call(providerRequest),
-				model,
-				params.promptId,
-				traceId,
-				provider.name,
-			);
-
-			const result: LLMTextResult = {
-				text: response.text,
-				usage: response.usage,
-				finishReason: response.finishReason,
-				requestId: response.requestId,
-				traceId,
-				promptId: params.promptId,
-				promptVersion: prompt.version,
-				model,
-				durationMs: Date.now() - startTime,
-			};
-
-			await this.writeCache(params, cacheKey, result);
-
-			this.logCall({
-				traceId,
-				promptId: params.promptId,
-				promptVersion: prompt.version,
-				model,
-				provider: provider.name,
-				success: true,
-				usage: response.usage,
-				durationMs: result.durationMs,
-			});
-
-			return result;
-		} catch (error) {
-			this.logCall({
-				traceId,
-				promptId: params.promptId,
-				promptVersion: prompt.version,
-				model,
-				provider: provider.name,
-				success: false,
-				error: error instanceof Error ? error.message : String(error),
-				durationMs: Date.now() - startTime,
-			});
-			throw error;
-		}
+		return this.executeGeneration<LLMTextResult>(params, {
+			responseFormat: "text",
+			mapResponse: (_response, base) => base,
+		});
 	}
 
 	/**
@@ -184,125 +91,63 @@ export class LLMService {
 	async callJSON<T = unknown>(
 		params: LLMJsonParams<T>,
 	): Promise<LLMJsonResult<T>> {
-		const startTime = Date.now();
-		const traceId = params.traceId || this.generateTraceId();
-		const { prompt, model, provider, cacheKey } = this.resolveCall(params);
-
-		if (prompt.output.type !== "json") {
-			throw new Error(
-				`Prompt ${params.promptId} is not configured for JSON output`,
-			);
-		}
-
-		// Cache read
-		if (
-			params.cache?.mode === "read_through" &&
-			this.config.enableCache !== false
-		) {
-			const cached = await this.cache.get<LLMJsonResult<T>>(cacheKey);
-			if (cached) {
-				this.logCall({
-					traceId,
-					promptId: params.promptId,
-					promptVersion: prompt.version,
-					model,
-					provider: provider.name,
-					success: true,
-					cached: true,
-					durationMs: Date.now() - startTime,
-				});
-				return { ...cached, traceId };
-			}
-		}
-
-		const messages = this.promptReg.buildMessages(prompt, params.variables);
-		this.enforceJsonInstruction(messages);
-
-		const providerRequest = this.buildProviderRequest(
-			params,
-			prompt,
-			model,
-			messages,
-			"json",
-		);
-
-		try {
-			const response = await this.callWithRetries(
-				() => provider.call(providerRequest),
-				model,
-				params.promptId,
-				traceId,
-				provider.name,
-			);
-
-			const parsed = this.parseAndRepairJSON<T>(
-				response.text,
-				provider.name,
-				model,
-				params.promptId,
-				response.requestId,
-			);
-
-			const schema = params.jsonSchema || prompt.output.schema;
-			const validated = this.validateSchema<T>(
-				parsed,
-				schema,
-				provider.name,
-				model,
-				params.promptId,
-				response.requestId,
-			);
-
-			const result: LLMJsonResult<T> = {
-				data: validated,
-				text: response.text,
-				usage: response.usage,
-				finishReason: response.finishReason,
-				requestId: response.requestId,
-				traceId,
-				promptId: params.promptId,
-				promptVersion: prompt.version,
-				model,
-				durationMs: Date.now() - startTime,
-			};
-
-			await this.writeCache(params, cacheKey, result);
-
-			this.logCall({
-				traceId,
-				promptId: params.promptId,
-				promptVersion: prompt.version,
-				model,
-				provider: provider.name,
-				success: true,
-				usage: response.usage,
-				durationMs: result.durationMs,
-			});
-
-			return result;
-		} catch (error) {
-			this.logCall({
-				traceId,
-				promptId: params.promptId,
-				promptVersion: prompt.version,
-				model,
-				provider: provider.name,
-				success: false,
-				error: error instanceof Error ? error.message : String(error),
-				durationMs: Date.now() - startTime,
-			});
-			throw error;
-		}
+		return this.executeGeneration<LLMJsonResult<T>>(params, {
+			responseFormat: "json",
+			validatePrompt: (prompt) => {
+				if (prompt.output.type !== "json") {
+					throw new Error(
+						`Prompt ${params.promptId} is not configured for JSON output`,
+					);
+				}
+			},
+			prepareMessages: enforceJsonInstruction,
+			mapResponse: (response, base, { prompt, providerName }) => {
+				const parsed = parseAndRepairJSON<T>(
+					response.text,
+					providerName,
+					base.model,
+					params.promptId,
+					response.requestId,
+				);
+				const schema = params.jsonSchema || prompt.output.schema;
+				const validated = validateSchema<T>(
+					parsed,
+					schema,
+					providerName,
+					base.model,
+					params.promptId,
+					response.requestId,
+				);
+				return { ...base, data: validated };
+			},
+		});
 	}
 
 	/**
 	 * Generate streaming response.
 	 * Note: streaming bypasses retry logic — handle reconnection at the call site if needed.
+	 * Cache and idempotency settings on `params` are ignored and will emit a warn-log
+	 * if provided.
 	 */
 	async callStream(params: LLMTextParams): Promise<LLMStreamResult> {
 		const traceId = params.traceId || this.generateTraceId();
 		const { prompt, model, provider } = this.resolveCall(params);
 
+		if (params.cache || params.idempotencyKey) {
+			this.logger?.warn(
+				"callStream ignores `cache` and `idempotencyKey` params — streams are not cached",
+				{ traceId, promptId: params.promptId, model },
+			);
+		}
+
+		const ctx: CallContext = {
+			traceId,
+			promptId: params.promptId,
+			promptVersion: prompt.version,
+			model,
+			providerName: provider.name,
+			startedAt: Date.now(),
+		};
 		const messages = this.promptReg.buildMessages(prompt, params.variables);
 		const providerRequest = this.buildProviderRequest(
 			params,
@@ -322,14 +167,9 @@ export class LLMService {
 				model,
 			};
 		} catch (error) {
-			this.logCall({
-				traceId,
-				promptId: params.promptId,
-				promptVersion: prompt.version,
-				model,
-				provider: provider.name,
+			logOutcome(this.logger, ctx, {
 				success: false,
-				error: error instanceof Error ? error.message : String(error),
+				error: errorMessage(error),
 				durationMs: 0,
 			});
 			throw error;
@@ -340,93 +180,196 @@ export class LLMService {
 	 * Generate vector embedding for text
 	 */
 	async embed(params: LLMEmbedParams): Promise<LLMEmbedResult> {
-		const traceId = this.generateTraceId();
-		const startTime = Date.now();
-		const provider = this.getProvider(params.model);
-
-		try {
-			const response = await provider.embed({
-				text: params.text,
-				model: params.model,
-				dimensions: params.dimensions,
-				taskType: params.taskType,
-			});
-
-			this.logCall({
-				traceId,
-				model: params.model,
-				provider: provider.name,
-				success: true,
-				durationMs: Date.now() - startTime,
-			});
-
-			return {
+		return this.executeEmbedOp(
+			params.model,
+			params.traceId,
+			(provider) =>
+				provider.embed({
+					text: params.text,
+					model: params.model,
+					dimensions: params.dimensions,
+					taskType: params.taskType,
+					signal: params.signal,
+				}),
+			(response) => ({
 				embedding: response.embedding,
 				usage: response.usage,
 				model: params.model,
-			};
-		} catch (error) {
-			this.logCall({
-				traceId,
-				model: params.model,
-				provider: provider.name,
-				success: false,
-				error: error instanceof Error ? error.message : String(error),
-				durationMs: Date.now() - startTime,
-			});
-			throw error;
-		}
+			}),
+		);
 	}
 
 	/**
 	 * Generate vector embeddings for multiple texts
 	 */
 	async embedBatch(params: LLMEmbedBatchParams): Promise<LLMEmbedBatchResult> {
-		const traceId = this.generateTraceId();
-		const startTime = Date.now();
-		const provider = this.getProvider(params.model);
-
-		try {
-			const response = await provider.embedBatch({
-				texts: params.texts,
-				model: params.model,
-				dimensions: params.dimensions,
-				taskType: params.taskType,
-			});
-
-			this.logCall({
-				traceId,
-				model: params.model,
-				provider: provider.name,
-				success: true,
-				durationMs: Date.now() - startTime,
-			});
-
-			return {
+		return this.executeEmbedOp(
+			params.model,
+			params.traceId,
+			(provider) =>
+				provider.embedBatch({
+					texts: params.texts,
+					model: params.model,
+					dimensions: params.dimensions,
+					taskType: params.taskType,
+					signal: params.signal,
+				}),
+			(response) => ({
 				embeddings: response.embeddings,
 				usage: response.usage,
 				model: params.model,
-			};
-		} catch (error) {
-			this.logCall({
+			}),
+		);
+	}
+
+	// ─── Shared executors ────────────────────────────────────────────────────
+
+	/**
+	 * The shared pipeline for `callText` and `callJSON`:
+	 * resolve prompt → (maybe read cache) → build request → call w/ retries →
+	 * map response → write cache → log. Errors are logged and rethrown.
+	 */
+	private async executeGeneration<TResult extends LLMTextResult>(
+		params: LLMTextParams,
+		options: {
+			responseFormat: "text" | "json";
+			validatePrompt?: (prompt: PromptDefinition) => void;
+			prepareMessages?: (messages: Messages) => void;
+			mapResponse: (
+				response: LLMProviderResponse,
+				base: LLMTextResult,
+				genCtx: { prompt: PromptDefinition; providerName: string },
+			) => TResult;
+		},
+	): Promise<TResult> {
+		const { prompt, model, provider } = this.resolveCall(params);
+		options.validatePrompt?.(prompt);
+
+		const traceId = params.traceId || this.generateTraceId();
+		const ctx: CallContext = {
+			traceId,
+			promptId: params.promptId,
+			promptVersion: prompt.version,
+			model,
+			providerName: provider.name,
+			startedAt: Date.now(),
+		};
+
+		const cacheKey = this.cacheKeyOrNull(params, prompt, model);
+		if (cacheKey && params.cache?.mode === "read_through") {
+			const cached = await this.cache.get<TResult>(cacheKey);
+			if (cached) {
+				logOutcome(this.logger, ctx, { success: true, cached: true });
+				return {
+					...cached,
+					traceId,
+					durationMs: Date.now() - ctx.startedAt,
+					requestId: undefined,
+				};
+			}
+		}
+
+		const messages = this.promptReg.buildMessages(prompt, params.variables);
+		options.prepareMessages?.(messages);
+
+		const providerRequest = this.buildProviderRequest(
+			params,
+			prompt,
+			model,
+			messages,
+			options.responseFormat,
+		);
+
+		try {
+			const response = await callWithRetries(
+				() => provider.call(providerRequest),
+				this.config,
+				this.logger,
+				ctx,
+			);
+
+			const base: LLMTextResult = {
+				text: response.text,
+				usage: response.usage,
+				finishReason: response.finishReason,
+				requestId: response.requestId,
 				traceId,
-				model: params.model,
-				provider: provider.name,
+				promptId: params.promptId,
+				promptVersion: prompt.version,
+				model,
+				durationMs: Date.now() - ctx.startedAt,
+			};
+			const result = options.mapResponse(response, base, {
+				prompt,
+				providerName: provider.name,
+			});
+
+			if (cacheKey) {
+				await this.writeCache(params, cacheKey, result);
+			}
+
+			logOutcome(this.logger, ctx, {
+				success: true,
+				usage: response.usage,
+			});
+			return result;
+		} catch (error) {
+			logOutcome(this.logger, ctx, {
 				success: false,
-				error: error instanceof Error ? error.message : String(error),
-				durationMs: Date.now() - startTime,
+				error: errorMessage(error),
 			});
 			throw error;
 		}
 	}
 
-	// ─── Private pipeline helpers ────────────────────────────────────────────
+	/**
+	 * Shared pipeline for `embed` and `embedBatch`:
+	 * select provider → call w/ retries → map → log.
+	 */
+	private async executeEmbedOp<TResp, TOut>(
+		model: string,
+		traceIdParam: string | undefined,
+		run: (provider: LLMProvider) => Promise<TResp>,
+		toResult: (response: TResp) => TOut,
+	): Promise<TOut> {
+		const provider = selectProvider(
+			this.providers,
+			model,
+			this.config,
+			this.logger,
+		);
+		const ctx: CallContext = {
+			traceId: traceIdParam || this.generateTraceId(),
+			model,
+			providerName: provider.name,
+			startedAt: Date.now(),
+		};
+
+		try {
+			const response = await callWithRetries(
+				() => run(provider),
+				this.config,
+				this.logger,
+				ctx,
+			);
+			logOutcome(this.logger, ctx, { success: true });
+			return toResult(response);
+		} catch (error) {
+			logOutcome(this.logger, ctx, {
+				success: false,
+				error: errorMessage(error),
+			});
+			throw error;
+		}
+	}
+
+	// ─── Resolution helpers ──────────────────────────────────────────────────
 
 	/**
-	 * Resolve prompt, model, provider and cache key — shared by all call* methods.
-	 * Throws early with a clear message if the prompt does not exist.
+	 * Resolve prompt, model, and provider — shared by all call* methods.
+	 * Throws early with a clear message if the prompt does not exist or no model can be resolved.
 	 */
-	private resolveCall(params: LLMTextParams): ResolvedCall {
+	private resolveCall(params: LLMTextParams): ResolvedPrompt {
 		const prompt = this.promptReg.getPrompt(
 			params.promptId,
 			params.promptVersion,
@@ -438,11 +381,25 @@ export class LLMService {
 			);
 		}
 
-		const model = params.model || prompt.modelDefaults.model;
-		const provider = this.getProvider(model);
-		const cacheKey = this.buildCacheKey(params, prompt);
+		const model =
+			params.model ||
+			prompt.modelDefaults.model ||
+			this.config.defaultModel ||
+			"";
 
-		return { prompt, model, provider, cacheKey };
+		if (!model) {
+			throw new Error(
+				`No model resolved for prompt "${params.promptId}" — set params.model, prompt.modelDefaults.model, or LLMServiceConfig.defaultModel`,
+			);
+		}
+
+		const provider = selectProvider(
+			this.providers,
+			model,
+			this.config,
+			this.logger,
+		);
+		return { prompt, model, provider };
 	}
 
 	/**
@@ -450,9 +407,9 @@ export class LLMService {
 	 */
 	private buildProviderRequest(
 		params: LLMTextParams,
-		prompt: NonNullable<ReturnType<PromptRegistry["getPrompt"]>>,
+		prompt: PromptDefinition,
 		model: string,
-		messages: ReturnType<PromptRegistry["buildMessages"]>,
+		messages: Messages,
 		responseFormat: "text" | "json",
 	): ProviderRequest {
 		return {
@@ -467,7 +424,22 @@ export class LLMService {
 			topP: params.topP ?? prompt.modelDefaults.topP,
 			seed: params.seed,
 			responseFormat,
+			signal: params.signal,
 		};
+	}
+
+	/**
+	 * Only build a cache key when the call is eligible for caching;
+	 * skip the hash entirely when caching is disabled globally or not requested.
+	 */
+	private cacheKeyOrNull(
+		params: LLMTextParams,
+		prompt: PromptDefinition,
+		resolvedModel: string,
+	): string | null {
+		if (this.config.enableCache === false) return null;
+		if (!params.cache) return null;
+		return buildCacheKey(params, prompt, resolvedModel);
 	}
 
 	/**
@@ -481,223 +453,13 @@ export class LLMService {
 		if (
 			(params.cache?.mode === "read_through" ||
 				params.cache?.mode === "refresh") &&
-			this.config.enableCache !== false &&
 			params.cache.ttlSeconds
 		) {
 			await this.cache.set(cacheKey, result, params.cache.ttlSeconds);
 		}
 	}
 
-	/**
-	 * Append a JSON-only instruction to the last user message if not already present.
-	 * Mutates the messages array in place.
-	 */
-	private enforceJsonInstruction(
-		messages: ReturnType<PromptRegistry["buildMessages"]>,
-	): void {
-		if (messages.length === 0) return;
-
-		const last = messages[messages.length - 1];
-		if (last.role !== "user") return;
-
-		const alreadyInstructed =
-			last.content.includes("ONLY JSON") ||
-			last.content.includes("valid JSON") ||
-			last.content.includes("JSON format");
-
-		if (!alreadyInstructed) {
-			messages[messages.length - 1] = {
-				...last,
-				content: `${last.content}\n\nIMPORTANT: Return ONLY valid JSON. No markdown, no code fences, no explanatory text.`,
-			};
-		}
-	}
-
-	/**
-	 * Parse raw text as JSON; attempt a repair pass on failure.
-	 */
-	private parseAndRepairJSON<T>(
-		text: string,
-		providerName: string,
-		model: string,
-		promptId: string,
-		requestId?: string,
-	): T {
-		try {
-			return this.parseJSON<T>(text);
-		} catch (parseError) {
-			try {
-				return JSON.parse(this.repairJSON(text)) as T;
-			} catch (repairError) {
-				throw new LLMParseError(
-					`Failed to parse JSON response: ${repairError instanceof Error ? repairError.message : String(repairError)}`,
-					providerName,
-					model,
-					text,
-					promptId,
-					requestId,
-					parseError instanceof Error ? parseError : undefined,
-				);
-			}
-		}
-	}
-
-	/**
-	 * Validate a parsed value against a Zod schema.
-	 * Returns the value unchanged when no schema is provided.
-	 */
-	private validateSchema<T>(
-		parsed: T,
-		schema: z.ZodSchema<T> | undefined,
-		providerName: string,
-		model: string,
-		promptId: string,
-		requestId?: string,
-	): T {
-		if (!schema) return parsed;
-
-		try {
-			return schema.parse(parsed);
-		} catch (validationError) {
-			if (validationError instanceof z.ZodError) {
-				throw new LLMSchemaError(
-					`Schema validation failed: ${validationError.message}`,
-					providerName,
-					model,
-					validationError.errors.map(
-						(e) => `${e.path.join(".")}: ${e.message}`,
-					),
-					promptId,
-					requestId,
-					validationError,
-				);
-			}
-			throw validationError;
-		}
-	}
-
-	// ─── Retry logic ─────────────────────────────────────────────────────────
-
-	/**
-	 * Call a provider fn with exponential backoff retries.
-	 * Only retries on LLMTransientError; all other errors propagate immediately.
-	 */
-	private async callWithRetries<T>(
-		fn: () => Promise<T>,
-		model: string,
-		promptId?: string,
-		traceId?: string,
-		providerName?: string,
-	): Promise<T> {
-		const maxRetries = this.config.maxRetries ?? 3;
-		const baseDelay = this.config.retryBaseDelayMs ?? 1000;
-		let lastError: Error | undefined;
-
-		for (let attempt = 0; attempt < maxRetries; attempt++) {
-			try {
-				return await fn();
-			} catch (error) {
-				lastError =
-					error instanceof Error ? error : new Error(String(error));
-
-				if (!(error instanceof LLMTransientError)) throw error;
-				if (attempt === maxRetries - 1) throw error;
-
-				const delay =
-					baseDelay * Math.pow(2, attempt) + Math.random() * 1000;
-				await this.sleep(delay);
-
-				this.logCall({
-					traceId,
-					promptId,
-					model,
-					provider: providerName,
-					success: false,
-					error: `Retry attempt ${attempt + 1}/${maxRetries}: ${lastError.message}`,
-					retry: true,
-					durationMs: 0,
-				});
-			}
-		}
-
-		// Unreachable — every loop iteration either returns or throws
-		throw lastError ?? new Error("Unknown error in retry loop");
-	}
-
-	// ─── JSON utilities ───────────────────────────────────────────────────────
-
-	/**
-	 * Parse JSON with a descriptive error message
-	 */
-	private parseJSON<T>(text: string): T {
-		try {
-			return JSON.parse(text) as T;
-		} catch (error) {
-			throw new Error(
-				`JSON parse error: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		}
-	}
-
-	/**
-	 * Repair JSON by stripping markdown fences and extracting the first brace pair
-	 */
-	private repairJSON(text: string): string {
-		let repaired = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "");
-		repaired = repaired.replace(/\s*```\s*$/i, "");
-
-		const firstBrace = repaired.indexOf("{");
-		const lastBrace = repaired.lastIndexOf("}");
-
-		if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-			repaired = repaired.substring(firstBrace, lastBrace + 1);
-		}
-
-		return repaired.trim();
-	}
-
-	// ─── Utilities ────────────────────────────────────────────────────────────
-
-	/**
-	 * Build cache key from params.
-	 * Uses nullish check for temperature so that 0 is not treated as "unset".
-	 */
-	private buildCacheKey(
-		params: LLMTextParams | LLMJsonParams,
-		prompt: { promptId: string; version: string | number },
-	): string {
-		const keyParts = [
-			params.idempotencyKey ?? "",
-			prompt.promptId,
-			String(prompt.version),
-			JSON.stringify(params.variables ?? {}),
-			params.model ?? "",
-			params.temperature != null ? String(params.temperature) : "",
-		];
-
-		return createHash("sha256").update(keyParts.join("|")).digest("hex");
-	}
-
-	/**
-	 * Generate a unique trace ID using crypto.randomUUID
-	 */
 	private generateTraceId(): string {
 		return `trace_${randomUUID()}`;
-	}
-
-	/**
-	 * Emit a structured log entry via the injected logger (no-op if none configured)
-	 */
-	private logCall(log: LLMCallLogEntry): void {
-		if (this.logger) {
-			this.logger.llmCall(log);
-		}
-	}
-
-	/**
-	 * Sleep utility for retry delays
-	 */
-	private sleep(ms: number): Promise<void> {
-		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 }

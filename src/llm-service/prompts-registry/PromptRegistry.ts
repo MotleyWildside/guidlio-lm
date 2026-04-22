@@ -49,10 +49,10 @@ export class PromptRegistry {
     }> = [];
 
     // Add system message if present
-    if (prompt.system) {
+    if (prompt.systemPrompt) {
       messages.push({
         role: 'system',
-        content: this.interpolate(prompt.system, variables),
+        content: this.interpolate(prompt.systemPrompt, variables),
       });
     }
 
@@ -65,10 +65,10 @@ export class PromptRegistry {
     }
 
     // Add user message if present
-    if (prompt.userTemplate) {
+    if (prompt.userPrompt) {
       messages.push({
         role: 'user',
-        content: this.interpolate(prompt.userTemplate, variables),
+        content: this.interpolate(prompt.userPrompt, variables),
       });
     }
 

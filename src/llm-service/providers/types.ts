@@ -14,6 +14,7 @@ export interface LLMProviderRequest {
   topP?: number;
   responseFormat?: 'text' | 'json';
   seed?: number;
+  signal?: AbortSignal;
 }
 
 /**
@@ -50,6 +51,7 @@ export interface LLMProviderEmbedRequest {
   model: string;
   dimensions?: number;
   taskType?: 'RETRIEVAL_DOCUMENT' | 'RETRIEVAL_QUERY';
+  signal?: AbortSignal;
 }
 
 /**
@@ -60,6 +62,7 @@ export interface LLMProviderEmbedBatchRequest {
   model: string;
   dimensions?: number;
   taskType?: 'RETRIEVAL_DOCUMENT' | 'RETRIEVAL_QUERY';
+  signal?: AbortSignal;
 }
 
 /**
