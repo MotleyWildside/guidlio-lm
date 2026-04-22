@@ -18,7 +18,6 @@ export {
 	PipelineStep,
 	DefaultPolicy,
 	LoggerPipelineObserver,
-	STEP_STATUS,
 	PIPELINE_STATUS,
 	OUTCOME_TYPE,
 	TRANSITION_TYPE,
@@ -52,9 +51,10 @@ export type {
 	LLMEmbedBatchParams,
 	LLMEmbedBatchResult,
 	LLMServiceConfig,
-	CacheConfig,
-	LLMLogger,
-} from "./types";
+} from "./llm-service/types";
+
+export type { CacheConfig } from "./llm-service/cache/types";
+export type { LLMLogger } from "./logger/types";
 
 export type {
 	PromptDefinition,
@@ -69,7 +69,7 @@ export {
 	LLMPermanentError,
 	LLMParseError,
 	LLMSchemaError,
-} from "./errors";
+} from "./llm-service/errors";
 
 // Logger
 export { ConsoleLogger } from "./logger/logger";

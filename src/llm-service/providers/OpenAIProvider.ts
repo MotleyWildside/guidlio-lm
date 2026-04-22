@@ -1,5 +1,5 @@
 import OpenAI from 'openai/index.mjs';
-import { LLMError, LLMTransientError, LLMPermanentError } from '../../errors';
+import { LLMError, LLMTransientError, LLMPermanentError } from '../errors';
 import type {
   LLMProvider,
   LLMProviderRequest,

@@ -30,11 +30,14 @@ export class PipelineError extends OrchestratorError {
 }
 
 /**
- * Error thrown when a pipeline definition is invalid.
+ * Error thrown when a pipeline definition is invalid (programmer error).
+ * Extends Error directly — this is a static configuration problem caught
+ * at construction or step-lookup time, not a runtime pipeline failure.
+ * It carries no HTTP status code.
  */
-export class PipelineDefinitionError extends OrchestratorError {
+export class PipelineDefinitionError extends Error {
   constructor(message: string) {
-    super(message, 500);
+    super(message);
     this.name = 'PipelineDefinitionError';
     Object.setPrototypeOf(this, PipelineDefinitionError.prototype);
   }

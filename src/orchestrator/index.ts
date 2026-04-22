@@ -12,12 +12,16 @@ export { PipelineOrchestrator } from './PipelineOrchestrator';
 export type {
   StepResult,
   StepOutcome,
+  StepOutcomeOk,
+  StepOutcomeFailed,
+  StepOutcomeRedirect,
   Transition,
   PipelinePolicy,
   PolicyDecisionInput,
   PolicyDecisionOutput,
   ContextAdjustment,
   PipelineRunResult,
+  PipelineStatus,
   RetryPolicy,
   RetryDecisionInput,
   PipelineOrchestratorConfig,
@@ -37,7 +41,6 @@ export { LoggerPipelineObserver } from './observers';
 export type { PipelineObserver } from './observers';
 
 export {
-  STEP_STATUS,
   PIPELINE_STATUS,
   OUTCOME_TYPE,
   TRANSITION_TYPE,

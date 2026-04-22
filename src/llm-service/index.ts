@@ -1,4 +1,6 @@
 export { LLMService } from "./LLMService";
+export * from "./types";
+export * from "./errors";
 export * from "./cache/types";
 export * from "./cache/CacheProvider";
 export * from "./prompts-registry/types";

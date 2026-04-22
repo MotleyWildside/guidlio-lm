@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import type { LLMLogger } from '../types';
+import type { LLMLogger } from './types';
 
 /**
  * Default logger implementation using console and chalk

@@ -4,7 +4,7 @@ import {
   TaskType,
   EmbedContentRequest,
 } from '@google/generative-ai';
-import { LLMError, LLMTransientError, LLMPermanentError } from '../../errors';
+import { LLMError, LLMTransientError, LLMPermanentError } from '../errors';
 import type {
   LLMProvider,
   LLMProviderRequest,

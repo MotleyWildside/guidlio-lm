@@ -4,6 +4,7 @@
 
 import { PipelineError } from './errors';
 import type { PipelineObserver } from './observers';
+import { PIPELINE_STATUS } from './constants';
 
 /**
  * Base context for all pipelines.
@@ -114,17 +115,17 @@ export abstract class PipelineStep<C extends BaseContext> {
   abstract run(ctx: C): Promise<StepResult<C>>;
 }
 /**
- * Result returned by executeStep, which no longer includes step metadata.
+ * Pipeline run status literal — derived from PIPELINE_STATUS so they stay in sync.
  */
-export type StepExecutionResult<C extends BaseContext> = {
-  stepResult: StepResult<C>;
-};
+export type PipelineStatus = (typeof PIPELINE_STATUS)[keyof typeof PIPELINE_STATUS];
 
 /**
  * Result returned by the pipeline orchestrator after execution.
+ * `degraded` is true when the pipeline completed via a DEGRADE transition
+ * (graceful partial failure) rather than a clean STOP/NEXT.
  */
 export type PipelineRunResult<C extends BaseContext> =
-  | { status: 'ok'; ctx: C }
+  | { status: 'ok'; ctx: C; degraded?: boolean }
   | { status: 'failed'; ctx: C; error: PipelineError };
 
 /**
@@ -154,6 +155,12 @@ export type PipelineOrchestratorConfig<C extends BaseContext> = {
   steps: PipelineStep<C>[];
   observer?: PipelineObserver;
   policy?: PipelinePolicy<C>;
+  /**
+   * Maximum number of step transitions allowed in a single run.
+   * Prevents infinite loops caused by cyclic GOTO/RETRY policies.
+   * Defaults to DEFAULT_MAX_TRANSITIONS (50).
+   */
+  maxTransitions?: number;
 };
 
 /**

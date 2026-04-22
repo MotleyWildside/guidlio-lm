@@ -1,5 +1,5 @@
 import { OpenRouter } from '@openrouter/sdk';
-import { LLMError, LLMTransientError, LLMPermanentError } from '../../errors';
+import { LLMError, LLMTransientError, LLMPermanentError } from '../errors';
 import type {
   LLMProvider,
   LLMProviderRequest,

@@ -2,7 +2,7 @@
  * Utility functions for the Pipeline Executor framework.
  */
 
-import type { PipelineRunOptions } from './types';
+import type { BaseContext, PipelineRunOptions } from './types';
 
 /**
  * Generates a trace ID using crypto.randomUUID() or a fallback.
@@ -17,24 +17,14 @@ export function generateTraceId(): string {
 
 /**
  * Extracts or generates a trace ID from context or options.
+ * C extends BaseContext guarantees ctx.traceId is always a string — no runtime
+ * duck-typing needed.
  */
-export function getTraceId<C>(ctx: C, opts?: PipelineRunOptions): string {
-  if (opts?.traceId) {
-    return opts.traceId;
-  }
-  // Check if ctx has a traceId property
-  if (typeof ctx === 'object' && ctx !== null && 'traceId' in ctx) {
-    const traceId = (ctx as { traceId?: unknown }).traceId;
-    if (typeof traceId === 'string' && traceId.length > 0) {
-      return traceId;
-    }
-  }
+export function getTraceId<C extends BaseContext>(
+  ctx: C,
+  opts?: PipelineRunOptions
+): string {
+  if (opts?.traceId) return opts.traceId;
+  if (ctx.traceId) return ctx.traceId;
   return generateTraceId();
-}
-
-/**
- * Parse YYYY-MM-DD date string to Date object
- */
-export function parseDate(dateStr: string): Date {
-  return new Date(dateStr + 'T00:00:00');
 }

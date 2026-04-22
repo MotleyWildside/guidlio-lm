@@ -3,16 +3,6 @@
  */
 
 /**
- * Step outcome types (semantic, not control flow).
- * @deprecated Use StepOutcome type instead. Kept for backward compatibility.
- */
-export const STEP_STATUS = {
-  CONTINUE: 'continue',
-  STOP: 'stop',
-  ERROR: 'error',
-} as const;
-
-/**
  * Step outcome types (semantic).
  */
 export const OUTCOME_TYPE = {

@@ -5,6 +5,7 @@ import type { PromptDefinition } from './types';
  */
 export class PromptRegistry {
   private prompts: Map<string, PromptDefinition> = new Map();
+  private latestPrompts: Map<string, PromptDefinition> = new Map();
 
   /**
    * Register a prompt definition
@@ -12,6 +13,12 @@ export class PromptRegistry {
   register(prompt: PromptDefinition): void {
     const key = this.getKey(prompt.promptId, prompt.version);
     this.prompts.set(key, prompt);
+
+    // Update latest version index
+    const currentLatest = this.latestPrompts.get(prompt.promptId);
+    if (!currentLatest || this.isNewer(prompt.version, currentLatest.version)) {
+      this.latestPrompts.set(prompt.promptId, prompt);
+    }
   }
 
   /**
@@ -26,30 +33,7 @@ export class PromptRegistry {
       return this.prompts.get(key) || null;
     }
 
-    // Find latest version
-    let latest: PromptDefinition | null = null;
-    let latestVersion: string | number | null = null;
-
-    for (const [, prompt] of this.prompts.entries()) {
-      if (prompt.promptId === promptId) {
-        const currentVersion =
-          typeof prompt.version === 'string'
-            ? parseFloat(prompt.version)
-            : prompt.version;
-
-        if (
-          latestVersion === null ||
-          (typeof latestVersion === 'number' &&
-            typeof currentVersion === 'number' &&
-            currentVersion > latestVersion)
-        ) {
-          latest = prompt;
-          latestVersion = currentVersion;
-        }
-      }
-    }
-
-    return latest;
+    return this.latestPrompts.get(promptId) || null;
   }
 
   /**
@@ -124,6 +108,21 @@ export class PromptRegistry {
   }
 
   /**
+   * Check if v1 is newer (greater) than v2
+   */
+  private isNewer(v1: string | number, v2: string | number): boolean {
+    const n1 = typeof v1 === 'number' ? v1 : parseFloat(v1);
+    const n2 = typeof v2 === 'number' ? v2 : parseFloat(v2);
+
+    if (isNaN(n1) || isNaN(n2)) {
+      // Fallback to lexicographical comparison if numeric parsing fails
+      return String(v1) > String(v2);
+    }
+
+    return n1 > n2;
+  }
+
+  /**
    * Get all registered prompts (for debugging/inspection)
    */
   getAllPrompts(): PromptDefinition[] {
@@ -135,5 +134,6 @@ export class PromptRegistry {
    */
   clear(): void {
     this.prompts.clear();
+    this.latestPrompts.clear();
   }
 }

@@ -2,7 +2,7 @@
  * Observability hooks for pipeline execution.
  */
 
-import type { StepOutcome } from './types';
+import type { StepOutcome, PipelineStatus } from './types';
 import { logger } from '../logger/logger';
 
 /**
@@ -35,7 +35,7 @@ export interface PipelineObserver {
    */
   onRunFinish(params: {
     traceId: string;
-    outcome: string;
+    outcome: PipelineStatus;
     durationMs: number;
   }): void;
 
@@ -82,7 +82,7 @@ export class LoggerPipelineObserver implements PipelineObserver {
 
   onRunFinish(params: {
     traceId: string;
-    outcome: string;
+    outcome: PipelineStatus;
     durationMs: number;
   }): void {
     logger.pipelineEvent({

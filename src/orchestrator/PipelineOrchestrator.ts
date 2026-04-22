@@ -1,7 +1,6 @@
 import type {
   PipelineRunResult,
   PipelineStep,
-  StepExecutionResult,
   PipelinePolicy,
   Transition,
   PolicyDecisionInput,
@@ -15,7 +14,7 @@ import type {
 import { PipelineDefinitionError, StepExecutionError } from './errors';
 import { LoggerPipelineObserver, type PipelineObserver } from './observers';
 import { getTraceId } from './utils';
-import { PIPELINE_STATUS, TRANSITION_TYPE } from './constants';
+import { PIPELINE_STATUS, TRANSITION_TYPE, DEFAULT_MAX_TRANSITIONS } from './constants';
 import { DefaultPolicy } from './DefaultPolicy';
 
 /**
@@ -27,6 +26,7 @@ export class PipelineOrchestrator<C extends BaseContext> {
   private readonly stepOrder: string[];
   private readonly observer: PipelineObserver;
   private readonly policy: PipelinePolicy<C>;
+  private readonly maxTransitions: number;
 
   constructor(config: PipelineOrchestratorConfig<C>) {
     const stepNames = new Set<string>();
@@ -48,6 +48,7 @@ export class PipelineOrchestrator<C extends BaseContext> {
     this.stepOrder = stepOrder;
     this.observer = config.observer ?? new LoggerPipelineObserver();
     this.policy = config.policy ?? new DefaultPolicy<C>();
+    this.maxTransitions = config.maxTransitions ?? DEFAULT_MAX_TRANSITIONS;
   }
 
   /**
@@ -59,20 +60,24 @@ export class PipelineOrchestrator<C extends BaseContext> {
   ): Promise<PipelineRunResult<C>> {
     const traceId = getTraceId(initialCtx, opts);
     const startTime = Date.now();
-    let ctx = {
-      ...initialCtx,
-      traceId: initialCtx.traceId || traceId,
-    } as C;
+    let ctx = { ...initialCtx, traceId } as C;
 
     this.observer.onRunStart({ traceId });
 
     this.policy.reset();
+    let transitionCount = 0;
 
     try {
       let currentStepName = this.stepOrder[0];
       let finalRunResult: PipelineRunResult<C> | undefined;
 
       while (!finalRunResult) {
+        if (++transitionCount > this.maxTransitions) {
+          throw new PipelineDefinitionError(
+            `Pipeline exceeded max transitions (${this.maxTransitions}). Possible infinite loop.`
+          );
+        }
+
         const step = this.stepsByName.get(currentStepName);
 
         if (!step) {
@@ -81,17 +86,17 @@ export class PipelineOrchestrator<C extends BaseContext> {
           );
         }
 
-        const executionResult = await this.executeStep({
+        const stepResult = await this.executeStep({
           step,
           ctx,
           traceId,
         });
 
-        ctx = executionResult.stepResult.ctx;
+        ctx = stepResult.ctx;
 
         const policyInput: PolicyDecisionInput<C> = {
           stepName: currentStepName,
-          stepResult: executionResult.stepResult,
+          stepResult,
           traceId,
         };
 
@@ -99,10 +104,7 @@ export class PipelineOrchestrator<C extends BaseContext> {
         const transition = policyOutput.transition;
 
         if (policyOutput.contextAdjustment) {
-          ctx = this.applyContextAdjustment({
-            ctx,
-            adjustment: policyOutput.contextAdjustment,
-          });
+          ctx = this.applyContextAdjustment(ctx, policyOutput.contextAdjustment);
         }
 
         const result = await this.applyTransition({
@@ -149,11 +151,7 @@ export class PipelineOrchestrator<C extends BaseContext> {
   /**
    * Applies a context adjustment to the context.
    */
-  private applyContextAdjustment(params: {
-    ctx: C;
-    adjustment: ContextAdjustment<C>;
-  }): C {
-    const { ctx, adjustment } = params;
+  private applyContextAdjustment(ctx: C, adjustment: ContextAdjustment<C>): C {
     switch (adjustment.type) {
       case 'none':
         return ctx;
@@ -265,7 +263,7 @@ export class PipelineOrchestrator<C extends BaseContext> {
         });
         return {
           type: 'finish',
-          result: { status: PIPELINE_STATUS.OK, ctx },
+          result: { status: PIPELINE_STATUS.OK, ctx, degraded: true },
         };
       }
 
@@ -283,7 +281,7 @@ export class PipelineOrchestrator<C extends BaseContext> {
     step: PipelineStep<C>;
     ctx: C;
     traceId: string;
-  }): Promise<StepExecutionResult<C>> {
+  }): Promise<StepResult<C>> {
     const { step, ctx, traceId } = params;
     const stepStartTime = Date.now();
 
@@ -303,7 +301,7 @@ export class PipelineOrchestrator<C extends BaseContext> {
         durationMs: stepDurationMs,
       });
 
-      return { stepResult };
+      return stepResult;
     } catch (error) {
       const stepDurationMs = Date.now() - stepStartTime;
       const caughtError =
@@ -328,12 +326,10 @@ export class PipelineOrchestrator<C extends BaseContext> {
         durationMs: stepDurationMs,
       });
 
-      const failedStepResult: StepResult<C> = {
+      return {
         ctx,
         outcome: exceptionOutcome,
       };
-
-      return { stepResult: failedStepResult };
     }
   }
 }
