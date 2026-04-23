@@ -7,11 +7,12 @@ A minimal, type-safe, Finite State Machine (FSM) powered framework for running s
 The orchestrator separates **execution logic** (Steps) from **routing logic** (Policies).
 
 ### 1. PipelineStep
-A step is a discrete unit of work. It takes a context and returns an `outcome`.
+A step is a discrete unit of work. It takes a context and per-invocation metadata, and returns an `outcome`.
 *   **Outcome**: Describes *what* happened semantically (e.g., `ok`, `failed`, `redirect`). It should not decide *where* to go next.
+*   **Meta** (`StepRunMeta`): Carries `attempt` (1-based retry count), `previousOutcome` (last outcome for this step, on retries), and `signal` (the run's `AbortSignal` for cooperative cancellation).
 
 ### 2. PipelinePolicy
-The policy is the "brain" of the pipeline. It looks at the outcome of the current step and decides the `transition`.
+The policy is the "brain" of the pipeline. It looks at the outcome of the current step and decides the `transition`. `decide()` may be synchronous or `async`.
 *   **Transition**: Describes *where* to go next (e.g., `next`, `goto`, `retry`, `stop`, `fail`, `degrade`).
 
 ### 3. PipelineOrchestrator
@@ -53,14 +54,15 @@ interface MyContext extends BaseContext {
 
 ### Creating a Step
 Extend the `PipelineStep` abstract class. Use status helpers like `ok()` and `failed()` for clean returns.
+Use `meta.attempt` for retry-aware logic and `meta.signal` for cooperative cancellation.
 
 ```typescript
-import { PipelineStep, StepResult, ok, failed } from './orchestrator';
+import { PipelineStep, StepResult, StepRunMeta, ok, failed } from './orchestrator';
 
 class ValidateInputStep extends PipelineStep<MyContext> {
   readonly name = 'validate-input';
 
-  async run(ctx: MyContext): Promise<StepResult<MyContext>> {
+  async run(ctx: MyContext, meta: StepRunMeta): Promise<StepResult<MyContext>> {
     if (!ctx.userId) {
       return failed({ ctx, error: new Error('Missing User ID'), retryable: false });
     }
@@ -70,25 +72,39 @@ class ValidateInputStep extends PipelineStep<MyContext> {
 ```
 
 ### Configuring the Pipeline
-Assemble steps and optionally a custom policy.
+Assemble steps and optionally a custom policy or observer.
 
 ```typescript
+import { PipelineOrchestrator, LoggerPipelineObserver } from './orchestrator';
+
 const orchestrator = new PipelineOrchestrator<MyContext>({
   steps: [
     new ValidateInputStep(),
     new FetchDataStep(),
     new ProcessDataStep()
   ],
-  maxTransitions: 20 // Guard against infinite loops
+  observer: new LoggerPipelineObserver(),
+  maxTransitions: 20, // guard against infinite loops
+  stepTimeoutMs: 5000, // fail the step if it takes longer than 5 s
 });
 
 const result = await orchestrator.run({ userId: '123', traceId: '...' });
 
 if (result.status === 'ok') {
-  console.log('Finished!', result.ctx, 'Degraded:', !!result.degraded);
+  console.log('Finished!', result.ctx);
+  if (result.degraded) console.warn('Degraded:', result.degraded.reason);
 } else {
   console.error('Failed:', result.error.message);
 }
+```
+
+#### Cancellation via AbortSignal
+
+```typescript
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 10_000); // cancel after 10 s
+
+const result = await orchestrator.run(ctx, { signal: controller.signal });
 ```
 
 ---
@@ -101,25 +117,34 @@ if (result.status === 'ok') {
 | `goto` | Jumps to a specific step by name. | - |
 | `retry` | Re-executes a step (defaults to current step). | - |
 | `stop` | Terminates execution immediately. | `ok` |
-| `degrade` | Terminates execution immediately (graceful failure). | `ok` (with `degraded: true`) |
+| `degrade` | Terminates execution immediately (graceful failure). | `ok` (with `degraded: { reason }`) |
 | `fail` | Terminates execution with an error. | `failed` |
 
+---
+
 ## Advanced: Custom Policies
-By default, `DefaultPolicy` handles `ok` (next) and `failed` (fail). You can extend it to handle custom logic like automatic retries or complex branching.
+By default, `DefaultPolicy` handles `ok` → next and `failed` → fail.
+`redirect` has no meaningful default — it is a routing signal that always requires
+a custom policy. If a step emits `redirect` and no routing is configured, the
+pipeline fails with a descriptive error pointing you to `override redirect()` or `decide()`.
+Extend `DefaultPolicy` to map redirect outcomes to GOTO transitions.
 
 ```typescript
+import { DefaultPolicy, StepOutcomeFailed, Transition, PolicyDecisionInput } from './orchestrator';
+
 class RetryPolicy extends DefaultPolicy<MyContext> {
   private retryCounts = new Map<string, number>();
 
-  protected override fail(outcome: StepOutcomeFailed): Transition {
-    const attempts = this.retryCounts.get('current') ?? 0;
-    
+  protected override fail(outcome: StepOutcomeFailed, input: PolicyDecisionInput<MyContext>): Transition {
+    const stepName = input.stepName;
+    const attempts = this.retryCounts.get(stepName) ?? 0;
+
     if (outcome.retryable && attempts < 3) {
-      this.retryCounts.set('current', attempts + 1);
+      this.retryCounts.set(stepName, attempts + 1);
       return { type: 'retry' };
     }
-    
-    return super.fail(outcome);
+
+    return super.fail(outcome, input);
   }
 
   override reset() {
@@ -128,10 +153,20 @@ class RetryPolicy extends DefaultPolicy<MyContext> {
 }
 ```
 
+> **Concurrent runs**: pass a factory to `policy` so each run gets its own policy instance:
+> ```typescript
+> new PipelineOrchestrator({ policy: () => new RetryPolicy(), steps: [...] });
+> ```
+> Passing an instance directly is safe for sequential runs only.
+
+---
+
 ## Observability
 The `PipelineObserver` interface allows you to hook into every lifecycle event:
 - `onRunStart` / `onRunFinish`
 - `onStepStart` / `onStepFinish`
+- `onTransition` *(optional)* — fired after the policy decides, before the transition is applied
 - `onError`
 
-The `LoggerPipelineObserver` is provided out-of-the-box for structured logging.
+Use `LoggerPipelineObserver` for structured logging, `NoopPipelineObserver` as a silent base class,
+or implement your own to emit metrics.

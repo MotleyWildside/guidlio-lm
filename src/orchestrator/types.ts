@@ -1,187 +1,148 @@
-/**
- * Core types for the Pipeline Orchestrator framework.
- */
-
 import { PipelineError } from './errors';
 import type { PipelineObserver } from './observers';
 import { PIPELINE_STATUS } from './constants';
 
-/**
- * Base context for all pipelines.
- * Ensures traceId and errors array are always available.
- */
 export interface BaseContext {
-  /**
-   * Raw input from the user request (typically from req.body)
-   */
-  input?: unknown;
-
-  /**
-   * The trace ID for the entire run
-   */
-  traceId: string;
+	input?: unknown;
+	traceId: string;
 }
 
 /**
- * Clarification question that a step can request when it needs more information.
+ * Per-invocation metadata supplied by the orchestrator to each step.
+ * Use `attempt` to implement step-internal backoff; `signal` to honour cancellation.
  */
+export type StepRunMeta = {
+	attempt: number;
+	previousOutcome?: StepOutcome;
+	signal?: AbortSignal;
+};
 
 /**
  * Semantic outcome of a step execution (domain/business logic, not control flow).
- * The outcome describes WHAT happened, not WHERE to go next.
+ * Describes WHAT happened, not WHERE to go next.
  */
-export type StepOutcome =
-  | StepOutcomeOk
-  | StepOutcomeFailed
-  | StepOutcomeRedirect;
+export type StepOutcome = StepOutcomeOk | StepOutcomeFailed | StepOutcomeRedirect;
 
 export type StepOutcomeOk = { type: 'ok' };
 export type StepOutcomeFailed = {
-  type: 'failed';
-  error: Error;
-  retryable?: boolean;
-  statusCode?: number;
+	type: 'failed';
+	error: Error;
+	retryable?: boolean;
+	statusCode?: number;
 };
 export type StepOutcomeRedirect = {
-  type: 'redirect';
-  message?: string;
+	type: 'redirect';
+	message?: string;
 };
+
 export type StepResult<C extends BaseContext> = {
-  ctx: C;
-  outcome: StepOutcome;
+	ctx: C;
+	outcome: StepOutcome;
 };
 
 /**
  * Transition decision made by the policy (control flow).
- * This determines WHERE the executor should go next.
+ * Determines WHERE the executor should go next.
  */
 export type Transition =
-  | { type: 'next' }
-  | { type: 'goto'; stepName: string }
-  | { type: 'retry'; stepName?: string }
-  | { type: 'stop' }
-  | { type: 'fail'; error: Error; statusCode?: number }
-  | { type: 'degrade'; reason: string };
+	| { type: 'next' }
+	| { type: 'goto'; stepName: string }
+	| { type: 'retry'; stepName?: string; delayMs?: number }
+	| { type: 'stop' }
+	| { type: 'fail'; error: Error; statusCode?: number }
+	| { type: 'degrade'; reason: string };
 
 /**
  * Context adjustment that can be applied during a transition.
+ * `override` replaces the entire context — the orchestrator preserves `traceId`
+ * if the replacement object omits it.
  */
 export type ContextAdjustment<C extends BaseContext> =
-  | { type: 'none' }
-  | { type: 'patch'; patch: Partial<C> }
-  | { type: 'override'; ctx: C };
+	| { type: 'none' }
+	| { type: 'patch'; patch: Partial<C> }
+	| { type: 'override'; ctx: C };
 
-/**
- * Input to the policy decision function.
- */
 export type PolicyDecisionInput<C extends BaseContext> = {
-  stepName: string;
-  stepResult: StepResult<C>;
-  traceId: string;
+	stepName: string;
+	stepResult: StepResult<C>;
+	traceId: string;
 };
 
-/**
- * Output from the policy decision function.
- */
 export type PolicyDecisionOutput<C extends BaseContext> = {
-  transition: Transition;
-  contextAdjustment?: ContextAdjustment<C>;
+	transition: Transition;
+	contextAdjustment?: ContextAdjustment<C>;
 };
 
 /**
  * Policy interface for deciding transitions based on step outcomes.
+ * `decide` may return synchronously or return a Promise — both are supported
+ * by the orchestrator, enabling async policy lookups (feature flags, DB, etc.).
  */
 export interface PipelinePolicy<C extends BaseContext> {
-  decide(input: PolicyDecisionInput<C>): PolicyDecisionOutput<C>;
-  reset(): void;
+	decide(
+		input: PolicyDecisionInput<C>,
+	): PolicyDecisionOutput<C> | Promise<PolicyDecisionOutput<C>>;
+	reset(): void;
 }
 
 /**
- * Class for pipeline steps.
- * Extend this class to create your own pipeline steps.
+ * Extend this class to create pipeline steps.
+ * `meta` carries the attempt count, previous outcome (on retries), and the
+ * run's AbortSignal — use it for retry-aware logic and cooperative cancellation.
  */
 export abstract class PipelineStep<C extends BaseContext> {
-  /**
-   * The unique name of this step.
-   * Must be unique within a pipeline.
-   */
-  abstract readonly name: string;
-
-  /**
-   * Executes the step with the given context.
-   * @param ctx The pipeline context
-   * @returns A promise that resolves to a step result
-   */
-  abstract run(ctx: C): Promise<StepResult<C>>;
+	abstract readonly name: string;
+	abstract run(ctx: C, meta: StepRunMeta): Promise<StepResult<C>>;
 }
-/**
- * Pipeline run status literal — derived from PIPELINE_STATUS so they stay in sync.
- */
+
 export type PipelineStatus = (typeof PIPELINE_STATUS)[keyof typeof PIPELINE_STATUS];
 
 /**
  * Result returned by the pipeline orchestrator after execution.
- * `degraded` is true when the pipeline completed via a DEGRADE transition
- * (graceful partial failure) rather than a clean STOP/NEXT.
+ * `degraded` is present when the pipeline completed via a DEGRADE transition;
+ * its `reason` string is the value supplied by the policy.
  */
 export type PipelineRunResult<C extends BaseContext> =
-  | { status: 'ok'; ctx: C; degraded?: boolean }
-  | { status: 'failed'; ctx: C; error: PipelineError };
+	| { status: 'ok'; ctx: C; degraded?: { reason: string } }
+	| { status: 'failed'; ctx: C; error: PipelineError };
 
-/**
- * Input to retry decision function.
- */
-export type RetryDecisionInput = {
-  stepName: string;
-  error?: Error;
-  outcome?: StepOutcome;
-  attempt: number;
-  traceId: string;
-};
-
-/**
- * Retry policy configuration for a step.
- */
-export type RetryPolicy = {
-  maxAttempts: number;
-  shouldRetry: (input: RetryDecisionInput) => boolean;
-  backoffMs: (attempt: number) => number;
-};
-
-/**
- * Configuration for creating a PipelineExecutor.
- */
 export type PipelineOrchestratorConfig<C extends BaseContext> = {
-  steps: PipelineStep<C>[];
-  observer?: PipelineObserver;
-  policy?: PipelinePolicy<C>;
-  /**
-   * Maximum number of step transitions allowed in a single run.
-   * Prevents infinite loops caused by cyclic GOTO/RETRY policies.
-   * Defaults to DEFAULT_MAX_TRANSITIONS (50).
-   */
-  maxTransitions?: number;
+	steps: PipelineStep<C>[];
+	observer?: PipelineObserver;
+	/**
+	 * Provide a policy instance for sequential pipelines, or a factory function
+	 * `() => PipelinePolicy` for concurrent-safe usage (the factory is called
+	 * once per `run()` invocation, giving each run isolated policy state).
+	 */
+	policy?: PipelinePolicy<C> | (() => PipelinePolicy<C>);
+	/**
+	 * Maximum number of loop iterations (step executions + transitions) per run.
+	 * Guards against infinite goto/retry cycles. Defaults to DEFAULT_MAX_TRANSITIONS (50).
+	 */
+	maxTransitions?: number;
+	/**
+	 * Per-step wall-clock timeout in milliseconds. When exceeded the step is
+	 * treated as a non-retryable failure. The step's Promise is not cancelled —
+	 * pass `meta.signal` into the step's async work for cooperative cancellation.
+	 */
+	stepTimeoutMs?: number;
 };
 
-/**
- * Options for running a pipeline.
- */
 export type PipelineRunOptions = {
-  traceId?: string;
+	traceId?: string;
+	/**
+	 * Aborting this signal causes the pipeline to stop before the next step
+	 * with a `PipelineAbortedError`. The signal is forwarded to each step via
+	 * `meta.signal` for cooperative cancellation of in-flight work.
+	 */
+	signal?: AbortSignal;
 };
 
-export type OkArgs<C extends BaseContext> = {
-  ctx: C;
-};
-
+export type OkArgs<C extends BaseContext> = { ctx: C };
 export type FailedArgs<C extends BaseContext> = {
-  ctx: C;
-  error: Error;
-  retryable?: boolean;
-  statusCode?: number;
+	ctx: C;
+	error: Error;
+	retryable?: boolean;
+	statusCode?: number;
 };
-
-export type RedirectArgs<C extends BaseContext> = {
-  ctx: C;
-  message?: string;
-};
+export type RedirectArgs<C extends BaseContext> = { ctx: C; message?: string };

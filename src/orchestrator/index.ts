@@ -7,45 +7,49 @@
  * @see README.md for usage examples
  */
 
-export { PipelineOrchestrator } from './PipelineOrchestrator';
+export { PipelineOrchestrator } from "./PipelineOrchestrator";
 
 export type {
-  StepResult,
-  StepOutcome,
-  StepOutcomeOk,
-  StepOutcomeFailed,
-  StepOutcomeRedirect,
-  Transition,
-  PipelinePolicy,
-  PolicyDecisionInput,
-  PolicyDecisionOutput,
-  ContextAdjustment,
-  PipelineRunResult,
-  PipelineStatus,
-  RetryPolicy,
-  RetryDecisionInput,
-  PipelineOrchestratorConfig,
-  PipelineRunOptions,
-  BaseContext,
-} from './types';
-export { PipelineStep } from './types';
-export { DefaultPolicy } from './DefaultPolicy';
+	StepResult,
+	StepOutcome,
+	StepOutcomeOk,
+	StepOutcomeFailed,
+	StepOutcomeRedirect,
+	StepRunMeta,
+	Transition,
+	PipelinePolicy,
+	PolicyDecisionInput,
+	PolicyDecisionOutput,
+	ContextAdjustment,
+	PipelineRunResult,
+	PipelineStatus,
+	PipelineOrchestratorConfig,
+	PipelineRunOptions,
+	BaseContext,
+	OkArgs,
+	FailedArgs,
+	RedirectArgs,
+} from "./types";
+export { PipelineStep } from "./types";
+
+export { RetryPolicy, RedirectRoutingPolicy, DefaultPolicy } from "./policies";
+export type { RetryPolicyOptions, RouteMap } from "./policies";
 
 export {
-  PipelineError,
-  PipelineDefinitionError,
-  StepExecutionError,
-} from './errors';
+	PipelineError,
+	PipelineDefinitionError,
+	StepExecutionError,
+	PipelineAbortedError,
+} from "./errors";
 
-export { LoggerPipelineObserver } from './observers';
-export type { PipelineObserver } from './observers';
+export { LoggerPipelineObserver, NoopPipelineObserver } from "./observers";
+export type { PipelineObserver } from "./observers";
 
 export {
-  PIPELINE_STATUS,
-  OUTCOME_TYPE,
-  TRANSITION_TYPE,
-  DEFAULT_MAX_TRANSITIONS,
-} from './constants';
+	PIPELINE_STATUS,
+	OUTCOME_TYPE,
+	TRANSITION_TYPE,
+	DEFAULT_MAX_TRANSITIONS,
+} from "./constants";
 
-export { ok, failed, redirect } from './statusHelpers';
-export type { OkArgs, FailedArgs, RedirectArgs } from './types';
+export { ok, failed, redirect } from "./statusHelpers";
