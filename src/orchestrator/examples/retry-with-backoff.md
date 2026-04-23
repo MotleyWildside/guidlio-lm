@@ -143,6 +143,37 @@ steps to be retryable, pass a custom `retryIf` that checks the error message, or
 use `meta.signal` inside the step so it can self-cancel and return an explicit
 `retryable: true` result.
 
+## Common pitfall: sharing a stateful policy instance across runs
+
+`RetryPolicy` stores per-step attempt counters. If you pass a single instance
+instead of a factory, those counters **persist across runs** — the second run
+starts with attempt counts left over from the first.
+
+```typescript
+// BUG — the attempt counter leaks between concurrent or sequential runs
+const policy = new RetryPolicy({ maxAttempts: 3 });
+const orchestrator = new GuidlioOrchestrator<ApiContext>({
+  steps: [...],
+  policy,            // instance shared by all runs ← wrong
+});
+
+// FIX — factory creates a fresh policy for each run()
+const orchestrator = new GuidlioOrchestrator<ApiContext>({
+  steps: [...],
+  policy: () => new RetryPolicy({ maxAttempts: 3 }),  // ← correct
+});
+```
+
+The orchestrator calls `policy.reset()` at the start of every run. For a factory
+this is a no-op because each run already gets a new instance. For a reused
+instance it clears the counters — so sequential (non-concurrent) runs are safe
+with either approach. Concurrent runs are only safe with a factory.
+
+**Rule of thumb:** any policy that maintains mutable state (attempt counters,
+circuit-breaker state, rate limiters) must be passed as a factory.
+
+---
+
 ## Extending `RetryPolicy`
 
 For retry logic that also needs routing (`failed` → GOTO a compensation step) or

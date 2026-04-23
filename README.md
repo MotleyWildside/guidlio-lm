@@ -1,8 +1,8 @@
 # 🧠 guidlio-lm
 
-> A lightweight, type-safe, and provider-agnostic gateway for LLMs.
+> A modern, simple, type-safe, and provider-agnostic gateway for LLMs.
 
-Stop fighting with multiple SDKs. **guidlio-lm** provides a unified interface for OpenAI, Gemini, and OpenRouter with built-in prompt management, caching, and complex workflow orchestration.
+Stop fighting with multiple SDKs. **guidlio-lm** provides a unified interface for OpenAI, Gemini, OpenRouter and any custom providers with built-in prompt management, caching, and complex workflow orchestration.
 
 ---
 
@@ -34,27 +34,28 @@ const llm = new GuidlioLMService({
 ```
 
 ### 3. Register Prompts
+
 Decouple your prompts from code using the built-in registry. Supports variables, versioning, and model defaults.
 
 ```typescript
 llm.promptRegistry.register({
-  promptId: "hello_world",
-  version: 1,
-  system: "You are a helpful assistant.",
-  userTemplate: "Hello, {name}! How are you today?",
-  modelDefaults: {
-    model: "gpt-4o",
-    temperature: 0.7
-  }
+	promptId: "hello_world",
+	version: 1,
+	system: "You are a helpful assistant.",
+	userTemplate: "Hello, {name}! How are you today?",
+	modelDefaults: {
+		model: "gpt-4o",
+		temperature: 0.7,
+	},
 });
 
 llm.promptRegistry.register({
-  promptId: "get_city_info",
-  version: 1,
-  system: "You are a travel expert.",
-  userTemplate: "Provide details about {city}.",
-  output: { type: "json" }, // Enforces JSON mode
-  modelDefaults: { model: "gemini-1.5-flash" }
+	promptId: "get_city_info",
+	version: 1,
+	system: "You are a travel expert.",
+	userTemplate: "Provide details about {city}.",
+	output: { type: "json" }, // Enforces JSON mode
+	modelDefaults: { model: "gemini-1.5-flash" },
 });
 ```
 
@@ -99,8 +100,7 @@ const pipe = new GuidlioOrchestrator({
 		},
 		{
 			name: "respond",
-			run: async (ctx) =>
-				ok({ ctx: { ...ctx, reply: "How can I help?" } }),
+			run: async (ctx) => ok({ ctx: { ...ctx, reply: "How can I help?" } }),
 		},
 	],
 });
@@ -122,6 +122,7 @@ const llm = new GuidlioLMService({
 ```
 
 ## 💾 Caching
+
 Optimize your costs and performance with flexible caching modes:
 
 - `read_through`: (Default) Checks cache first, calls LLM on miss, then stores the result.
@@ -130,10 +131,26 @@ Optimize your costs and performance with flexible caching modes:
 
 ```typescript
 const result = await llm.callText({
-  promptId: "expensive_query",
-  cache: { mode: "read_through", ttlSeconds: 3600 }
+	promptId: "expensive_query",
+	cache: { mode: "read_through", ttlSeconds: 3600 },
 });
 ```
+
+## Learn by example
+
+The [`examples/`](examples/) directory contains copy-paste-ready examples for every realistic integration shape — from a first call through custom providers, production pipelines, and framework integrations.
+
+**Curated starting points:**
+
+- [RAG pipeline](examples/rag-pipeline.md) — embed → retrieve → rerank → generate, end-to-end
+- [Tool-using agent](examples/agent-with-tools.md) — ReAct-style agent with calculator and search tools
+- [Custom provider — Anthropic](src/llm-service/examples/extensions/custom-provider-anthropic.md) — complete `LLMProvider` implementation with `@anthropic-ai/sdk`
+- [Circuit breaker policy](src/orchestrator/examples/extensions/custom-policy-circuit-breaker.md) — resilient production pipelines that degrade gracefully
+- [Streaming UI server](examples/streaming-ui-server.md) — Express SSE handler with client-disconnect cancellation
+
+Browse the full index: [examples/README.md](examples/README.md)
+
+---
 
 ## 📄 License
 

@@ -99,6 +99,20 @@ const result = await llm.embed({
 });
 ```
 
+## `taskType` and Gemini
+
+`taskType` is a Gemini-specific hint that tells the embedding model how the vector will be used, allowing it to optimize the embedding for retrieval quality.
+
+| `taskType` | When to use |
+| :--- | :--- |
+| `"RETRIEVAL_DOCUMENT"` | Texts that will be **stored** in the index — documents, chunks, knowledge-base entries |
+| `"RETRIEVAL_QUERY"` | Texts that will be **searched** against the index — user questions, search strings |
+| _(omitted)_ | General-purpose embeddings where retrieval asymmetry doesn't apply (classification, clustering) |
+
+Using mismatched `taskType` values (e.g. query vectors compared against document vectors embedded without `RETRIEVAL_DOCUMENT`) degrades retrieval quality. The asymmetry matters because a question and its answer are not semantically identical strings — Gemini optimizes for the _relationship_ between queries and documents, not just surface similarity.
+
+**OpenAI providers ignore `taskType`** — the parameter is passed through safely but has no effect on `text-embedding-3-*` models.
+
 ## Provider support
 
 | Provider | `embed` | `embedBatch` | Notes |
