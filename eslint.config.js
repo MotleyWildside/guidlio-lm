@@ -26,6 +26,9 @@ export default [
 			...tsPlugin.configs.recommended.rules,
 			"prettier/prettier": "error",
 			"@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+			// TypeScript's type-checker already covers undefined references more accurately.
+			// no-undef has no awareness of Node/browser globals in flat config without globals package.
+			"no-undef": "off",
 		},
 	},
 	prettierConfig,

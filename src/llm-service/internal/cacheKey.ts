@@ -38,10 +38,7 @@ function fingerprintSchema(schema: z.ZodSchema | undefined): string {
 	if (!schema) return "";
 	try {
 		const jsonSchema = zodToJsonSchema(schema);
-		return createHash("sha256")
-			.update(JSON.stringify(jsonSchema))
-			.digest("hex")
-			.slice(0, 16);
+		return createHash("sha256").update(JSON.stringify(jsonSchema)).digest("hex").slice(0, 16);
 	} catch {
 		return "schema";
 	}

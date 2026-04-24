@@ -30,13 +30,17 @@ export function makeMockProvider(options: MockProviderOptions = {}): LLMProvider
 		finishReason: "stop",
 	});
 
-	const defaultStreamImpl = async (_req: LLMProviderRequest): Promise<LLMProviderStreamResponse> => ({
+	const defaultStreamImpl = async (
+		_req: LLMProviderRequest,
+	): Promise<LLMProviderStreamResponse> => ({
 		stream: (async function* () {
 			yield { text: "mock", delta: "mock" };
 		})(),
 	});
 
-	const defaultEmbedImpl = async (_req: LLMProviderEmbedRequest): Promise<LLMProviderEmbedResponse> => ({
+	const defaultEmbedImpl = async (
+		_req: LLMProviderEmbedRequest,
+	): Promise<LLMProviderEmbedResponse> => ({
 		embedding: [0.1, 0.2, 0.3],
 		usage: { totalTokens: 5 },
 	});
