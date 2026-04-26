@@ -1,91 +1,92 @@
 {
-  "name": "guidlio-lm",
-  "version": "0.1.0",
-  "description": "A lightweight, provider-agnostic LLM gateway and FSM-capable pipeline orchestrator.",
-  "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
-    },
-    "./testing": {
-      "types": "./dist/testing/index.d.ts",
-      "import": "./dist/testing/index.js",
-      "require": "./dist/testing/index.cjs"
-    }
-  },
-  "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "lint": "eslint src/**/*.ts",
-    "format": "prettier --write \"src/**/*.ts\""
-  },
-  "keywords": [
-    "llm",
-    "openai",
-    "gemini",
-    "openrouter",
-    "prompt-management",
-    "zod",
-    "caching"
-  ],
-  "author": "MotleyWildside",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/MotleyWildside/guidlio-lm.git"
-  },
-  "bugs": {
-    "url": "https://github.com/MotleyWildside/guidlio-lm/issues"
-  },
-  "homepage": "https://github.com/MotleyWildside/guidlio-lm#readme",
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "dependencies": {
-    "@google/generative-ai": "^0.24.1",
-    "@openrouter/sdk": "^0.8.0",
-    "chalk": "^5.3.0",
-    "openai": "^4.28.0",
-    "zod-to-json-schema": "^3.25.2"
-  },
-  "peerDependencies": {
-    "zod": "^3.22.4",
-    "vitest": ">=1.0.0"
-  },
-  "peerDependenciesMeta": {
-    "zod": {
-      "optional": false
-    },
-    "vitest": {
-      "optional": true
-    }
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.39.4",
-    "@types/node": "^20.11.24",
-    "@typescript-eslint/eslint-plugin": "^8.59.0",
-    "@typescript-eslint/parser": "^8.59.0",
-    "@vitest/coverage-v8": "^4.1.5",
-    "eslint": "^10.2.1",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-prettier": "^5.5.5",
-    "prettier": "^3.8.3",
-    "tsup": "^8.0.0",
-    "typescript": "^5.3.3",
-    "vitest": "^4.1.5",
-    "zod": "^3.22.4"
-  }
+	"name": "guidlio-lm",
+	"version": "1.0.0",
+	"description": "A lightweight, provider-agnostic LLM gateway and FSM-capable pipeline orchestrator.",
+	"type": "module",
+	"main": "./dist/index.cjs",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"require": "./dist/index.cjs"
+		},
+		"./testing": {
+			"types": "./dist/testing/index.d.ts",
+			"import": "./dist/testing/index.js",
+			"require": "./dist/testing/index.cjs"
+		}
+	},
+	"scripts": {
+		"build": "tsup",
+		"dev": "tsup --watch",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:coverage": "vitest run --coverage",
+		"lint": "eslint src/**/*.ts",
+		"format": "prettier --write \"src/**/*.ts\"",
+		"prepublishOnly": "npm run build && npm run test"
+	},
+	"keywords": [
+		"llm",
+		"openai",
+		"gemini",
+		"openrouter",
+		"prompt-management",
+		"zod",
+		"caching"
+	],
+	"author": "MotleyWildside",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/MotleyWildside/guidlio-lm.git"
+	},
+	"bugs": {
+		"url": "https://github.com/MotleyWildside/guidlio-lm/issues"
+	},
+	"homepage": "https://github.com/MotleyWildside/guidlio-lm#readme",
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"engines": {
+		"node": ">=20.0.0"
+	},
+	"dependencies": {
+		"@google/generative-ai": "^0.24.1",
+		"@openrouter/sdk": "^0.8.0",
+		"chalk": "^5.3.0",
+		"openai": "^4.28.0",
+		"zod-to-json-schema": "^3.25.2"
+	},
+	"peerDependencies": {
+		"zod": "^3.22.4",
+		"vitest": ">=1.0.0"
+	},
+	"peerDependenciesMeta": {
+		"zod": {
+			"optional": false
+		},
+		"vitest": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@eslint/js": "^9.39.4",
+		"@types/node": "^20.11.24",
+		"@typescript-eslint/eslint-plugin": "^8.59.0",
+		"@typescript-eslint/parser": "^8.59.0",
+		"@vitest/coverage-v8": "^4.1.5",
+		"eslint": "^10.2.1",
+		"eslint-config-prettier": "^10.1.8",
+		"eslint-plugin-prettier": "^5.5.5",
+		"prettier": "^3.8.3",
+		"tsup": "^8.0.0",
+		"typescript": "^5.3.3",
+		"vitest": "^4.1.5",
+		"zod": "^3.22.4"
+	}
 }
