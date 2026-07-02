@@ -1,6 +1,6 @@
 {
 	"name": "@motleywildside/ai-sdk",
-	"version": "1.0.8",
+	"version": "1.0.9",
 	"description": "TypeScript SDK for building AI apps with OpenAI, Gemini, OpenRouter, structured outputs, prompt management, caching and pipelines.",
 	"type": "module",
 	"main": "./dist/index.cjs",
