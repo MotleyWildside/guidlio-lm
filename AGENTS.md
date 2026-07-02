@@ -38,7 +38,7 @@ The codebase has two independent subsystems that share only the logger and are c
 |---|---|---|---|---|
 | `OpenAIProvider` | ✓ | ✓ | ✓ | ✓ DALL-E 2/3 (`dall-e-*`) |
 | `GeminiProvider` | ✓ | ✓ | ✓ | ✓ Imagen (`imagen-*`) + Gemini image (`gemini-*-image`) |
-| `OpenRouterProvider` | ✓ | ✓ | — | — |
+| `OpenRouterProvider` | ✓ | ✓ | — | ✓ (OpenRouter Images API) |
 
 **DALL-E specifics** (`OpenAIProvider`):
 - DALL-E 3: use `aspectRatio` to select size (`1:1` → 1024×1024, `16:9` → 1792×1024, `9:16` → 1024×1792); `3:4`/`4:3` throw `LLMPermanentError`. `numberOfImages` must be 1.
@@ -47,7 +47,12 @@ The codebase has two independent subsystems that share only the logger and are c
 - Parameters with no DALL-E equivalent (`negativePrompt`, `seed`, `guidanceScale`, `enhancePrompt`, `personGeneration`) are silently ignored.
 - DALL-E 3 surfaces the model's revised prompt in `LLMProviderImageResponse.text`.
 
-
+**OpenRouter image specifics** (`OpenRouterProvider`):
+- Uses OpenRouter's dedicated Images API through `@openrouter/sdk`.
+- Supports `numberOfImages`, `aspectRatio`, `imageSize`, `outputMimeType`,
+  `outputCompressionQuality`, `seed`, and base64 `inputImages`.
+- `"0.5K"` is normalized to OpenRouter's `"512"` resolution.
+- `numberOfImages` must be 1–10; `outputCompressionQuality` must be 0–100.
 
 - **Provider selection** ([LMService.ts:65](src/llm-service/LMService.ts#L65)): if `config.defaultProvider` is set, it's used unconditionally (with a warning+fallback if the name doesn't resolve). Otherwise providers are probed via `supportsModel(model)`, falling back to the first registered provider. Providers match by model-name prefix (see `supportedModelPrefixes` in each provider).
 - **Retry policy** ([LMService.ts:585](src/llm-service/LMService.ts#L585)): exponential backoff is applied **only** to `LLMTransientError`. Any other error — including `LLMPermanentError`, `LLMParseError`, `LLMSchemaError` — propagates immediately. Streaming (`callStream`) bypasses retries entirely; reconnection is the caller's responsibility.

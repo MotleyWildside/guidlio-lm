@@ -71,7 +71,7 @@
 	},
 	"dependencies": {
 		"@google/genai": "^1.0.0",
-		"@openrouter/sdk": "^0.8.0",
+		"@openrouter/sdk": "^0.13.22",
 		"chalk": "^5.3.0",
 		"openai": "^4.28.0",
 		"zod-to-json-schema": "^3.25.2"
